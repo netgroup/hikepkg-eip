@@ -29,28 +29,16 @@ struct mcd {
     __u8 tts;
 } __attribute__((packed));
 
-struct mcd_stack {
-    struct mcd mcd1;
-    struct mcd mcd2;
-    struct mcd mcd3;
-    struct mcd mcd4;
-    struct mcd mcd5;
-    struct mcd mcd6;
-    struct mcd mcd7;
-    struct mcd mcd8;
-    struct mcd mcd9;
-    struct mcd mcd10;
-    struct mcd mcd11;
-    struct mcd mcd12;
-} __attribute__((packed));
-
 
 HIKE_PROG(HIKE_PROG_NAME)
 {
+    struct mcd mcd_stack[12];
     int hbh_remaining_bytes;
+    int eip_remaining_bytes;
     struct ipv6_opt_hdr *hbh;
     struct hdr_cursor *cur;
     struct pkt_info *info;
+    unsigned char *ptr;
     struct tlv *tlv_ptr;
     int hvm_ret = 0;
     int offset = 0;
@@ -91,8 +79,6 @@ HIKE_PROG(HIKE_PROG_NAME)
         if (unlikely(!tlv_ptr))
             goto drop;
         if (tlv_ptr->type == HBH_TYPE_EIP) {
-            offset += 2;
-            hbh_remaining_bytes -= 2;
             break;
         }
         offset += tlv_ptr->len + 2;
@@ -104,12 +90,8 @@ HIKE_PROG(HIKE_PROG_NAME)
         }
     }
     /* EIP */
-    tlv_ptr = (struct tlv *)cur_header_pointer(ctx, cur, offset,
-                                               sizeof(*tlv_ptr));
-    if (unlikely(!tlv_ptr))
-        goto drop;
-    hike_pr_debug("EIP type: 0x%x", tlv_ptr->type);
-    hike_pr_debug("EIP len: %u", tlv_ptr->len);
+    hike_pr_debug("HBH type: 0x%x", tlv_ptr->type);
+    hike_pr_debug("TLV len: %u", tlv_ptr->len);
     /* find PT TLV with MCD stack */
     eip_remaining_bytes = tlv_ptr->len - 2;
     offset += 2;
@@ -120,7 +102,6 @@ HIKE_PROG(HIKE_PROG_NAME)
             goto drop;
         if (tlv_ptr->type == EIP_TYPE_PT) {
             offset += 2;
-            eip_remaining_bytes -= 2;
             break;
         }
         offset += tlv_ptr->len + 2;
@@ -131,6 +112,14 @@ HIKE_PROG(HIKE_PROG_NAME)
             goto out;
         }
     }
+    /* MCD stack */
+    hike_pr_debug("EIP type: 0x%x", tlv_ptr->type);
+    hike_pr_debug("TLV len: %u", tlv_ptr->len);
+    ptr = cur_header_pointer(ctx, cur, offset, sizeof(*mcd_stack));
+    if (unlikely(!ptr))
+        goto drop;
+    memcpy(mcd_stack, ptr, sizeof(*mcd_stack));
+    hike_pr_debug("mcd0 id_ld: %u, tts: %u", mcd_stack[0].id_ld, mcd_stack[0].tts);
     
 
 out:
