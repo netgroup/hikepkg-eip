@@ -18,6 +18,7 @@
 #define HBH_TYPE_EIP 0x3e
 #define EIP_TYPE_PT 0x22
 #define EIP_MCD_SIZE 40
+#define MAX_TTS_SHIFT 22
 
 struct tlv {
     __u8 type;
@@ -29,19 +30,27 @@ struct mcd {
     __u8 tts;
 } __attribute__((packed));
 
+/* key 0 is delta time, key 1 is tts template */
+bpf_map(eip_mcd_time, HASH, __u8, __u64, 2);
 
 HIKE_PROG(HIKE_PROG_NAME)
 {
-    struct mcd mcd_stack[12];
+    struct mcd (*mcd_stack)[12];
     int hbh_remaining_bytes;
     int eip_remaining_bytes;
     struct ipv6_opt_hdr *hbh;
     struct hdr_cursor *cur;
     struct pkt_info *info;
-    unsigned char *ptr;
     struct tlv *tlv_ptr;
+    __u8 key_delta = 0;
+    __u8 key_tts = 1;
     int hvm_ret = 0;
     int offset = 0;
+    __u64 boottime;
+    __u64 realtime;
+    __u64 *template;
+    __u64 *delta;
+    __u8 tts;
     int ret;
 
     /* retrieve packet information from HIKe shared memory*/
@@ -115,11 +124,46 @@ HIKE_PROG(HIKE_PROG_NAME)
     /* MCD stack */
     hike_pr_debug("EIP type: 0x%x", tlv_ptr->type);
     hike_pr_debug("TLV len: %u", tlv_ptr->len);
-    ptr = cur_header_pointer(ctx, cur, offset, sizeof(*mcd_stack));
-    if (unlikely(!ptr))
+    mcd_stack = (struct mcd (*)[12]) cur_header_pointer(ctx, cur, offset, sizeof(*mcd_stack));
+    if (unlikely(!mcd_stack))
         goto drop;
-    memcpy(mcd_stack, ptr, sizeof(*mcd_stack));
-    hike_pr_debug("mcd0 id_ld: %u, tts: %u", mcd_stack[0].id_ld, mcd_stack[0].tts);
+    hike_pr_debug("mcd0 id_ld: %u, tts: %u", (*mcd_stack)[0].id_ld, (*mcd_stack)[0].tts);
+    /* shift right */
+    for (int i = 0; i < 11; ++i) {
+        (*mcd_stack)[11 - i] = (*mcd_stack)[10 - i];
+    }
+    /* read boot time from kernel, read delta between kernel boot time
+     * and user space clock real time from map. Add them up and get
+     * current clock real time.
+     * 
+     * Need to have started already python script stamp_maps.py to populate
+     * map with delta value, if map is empty, the packet is dropped.
+     */
+    boottime = bpf_ktime_get_boot_ns();
+    delta = bpf_map_lookup_elem(&eip_mcd_time, &key_delta);
+    if (unlikely(!delta)) {
+        hike_pr_err("could not read delta from map");
+            goto drop;
+    }
+    realtime = boottime + *delta;
+    hike_pr_debug("real time (nanoseconds): 0x%llx", realtime);
+    /* get tts template from map */
+    template = bpf_map_lookup_elem(&eip_mcd_time, &key_tts);
+    if (unlikely(!template)) {
+        hike_pr_err("could not read tts template from map");
+            goto drop;
+    }
+    hike_pr_debug("tts template shift (bits): %d", *template);
+    if (unlikely(*template > MAX_TTS_SHIFT)) {
+        hike_pr_err("tts template shift too large");
+        goto drop;
+    }
+    tts = (__u8) (realtime >> *template);
+    hike_pr_debug("tts : 0x%x", tts);
+    //TODO id_ld
+
+    /* add mcd to first position in stack */
+    *mcd_stack[0] = (struct mcd) { .id_ld = 0xff, .tts = tts };
     
 
 out:
