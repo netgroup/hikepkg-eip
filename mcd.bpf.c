@@ -36,14 +36,34 @@ struct mcd {
     __u8 tts;
 } __attribute__((packed));
 
+static __always_inline int
+ipv6_find_tlv(struct xdp_md *ctx, struct hdr_cursor *cur, int *offset,
+          int target, int remaining_bytes)
+{
+    struct tlv *tlv_ptr;
+    while (true) {
+        tlv_ptr = (struct tlv *)cur_header_pointer(ctx, cur, *offset,
+                                                   sizeof(*tlv_ptr));
+        if (unlikely(!tlv_ptr))
+            return -EBADMSG;
+        if (tlv_ptr->type == target) {
+            return tlv_ptr->type;
+        }
+        *offset += tlv_ptr->len + 2;
+        remaining_bytes -= tlv_ptr->len + 2;
+        if (remaining_bytes < 2) {
+            return -ENOENT;
+        }
+    }
+}
+
 /* key 0 is delta time, key 1 is tts template */
 bpf_map(eip_mcd_time, HASH, __u8, __u64, 4);
 
 HIKE_PROG(HIKE_PROG_NAME)
 {
     struct mcd (*mcd_stack)[MCD_STACK_LEN];
-    int hbh_remaining_bytes;
-    int eip_remaining_bytes;
+    int remaining_bytes;
     struct ipv6_opt_hdr *hbh;
     struct hdr_cursor *cur;
     struct pkt_info *info;
@@ -90,51 +110,39 @@ HIKE_PROG(HIKE_PROG_NAME)
      * not including the first 8 octets.
      * After calculating the number of Bytes, remove 2 relative to HBH header.
      */
-    hbh_remaining_bytes = (hbh->hdrlen + 1) * 8 - 2;
+    remaining_bytes = (hbh->hdrlen + 1) * 8 - 2;
     offset += 2;
     /* find EIP option */
-    while (true) {
-        tlv_ptr = (struct tlv *)cur_header_pointer(ctx, cur, offset,
-                                                   sizeof(*tlv_ptr));
-        if (unlikely(!tlv_ptr))
-            goto drop;
-        if (tlv_ptr->type == HBH_TYPE_EIP) {
-            break;
-        }
-        offset += tlv_ptr->len + 2;
-        hbh_remaining_bytes -= tlv_ptr->len + 2;
-        if (hbh_remaining_bytes < 2) {
-            hike_pr_debug("EIP option not found");
-            hvm_ret = 1;
-            goto out;
-        }
+    ret = ipv6_find_tlv(ctx, cur, &offset, HBH_TYPE_EIP, remaining_bytes);
+    if (unlikely(ret < 0)) {
+        hike_pr_debug("EIP option not found; rc: %d", ret);
+        hvm_ret = 1;
+        goto out;
     }
+    tlv_ptr = (struct tlv *)cur_header_pointer(ctx, cur, offset,
+                                               sizeof(*tlv_ptr));
+    if (unlikely(!tlv_ptr))
+        goto drop;
     /* EIP */
     hike_pr_debug("HBH type: 0x%x", tlv_ptr->type);
     hike_pr_debug("TLV len: %u", tlv_ptr->len);
     /* find PT TLV with MCD stack */
-    eip_remaining_bytes = tlv_ptr->len - 2;
+    remaining_bytes = tlv_ptr->len - 2;
     offset += 2;
-    while (true) {
-        tlv_ptr = (struct tlv *)cur_header_pointer(ctx, cur, offset,
-                                                   sizeof(*tlv_ptr));
-        if (unlikely(!tlv_ptr))
-            goto drop;
-        if (tlv_ptr->type == EIP_TYPE_PT) {
-            offset += 2;
-            break;
-        }
-        offset += tlv_ptr->len + 2;
-        eip_remaining_bytes -= tlv_ptr->len + 2;
-        if (eip_remaining_bytes < 2) {
-            hike_pr_debug("PT-MCD TLV not found");
-            hvm_ret = 1;
-            goto out;
-        }
+    ret = ipv6_find_tlv(ctx, cur, &offset, EIP_TYPE_PT, remaining_bytes);
+    if (unlikely(ret < 0)) {
+        hike_pr_debug("PT-MCD TLV not found; rc: %d", ret);
+        hvm_ret = 1;
+        goto out;
     }
+    tlv_ptr = (struct tlv *)cur_header_pointer(ctx, cur, offset,
+                                               sizeof(*tlv_ptr));
+    if (unlikely(!tlv_ptr))
+        goto drop;
     /* MCD stack */
     hike_pr_debug("EIP type: 0x%x", tlv_ptr->type);
     hike_pr_debug("TLV len: %u", tlv_ptr->len);
+    offset += 2;
     mcd_stack = (struct mcd (*)[MCD_STACK_LEN]) cur_header_pointer(
 		    			 ctx, cur, offset, sizeof(*mcd_stack));
     if (unlikely(!mcd_stack))
@@ -192,7 +200,6 @@ HIKE_PROG(HIKE_PROG_NAME)
         .id_ld = bpf_htons(id_ld),
         .tts = tts
     };
-    
 
 out:
     HVM_RET = hvm_ret;
