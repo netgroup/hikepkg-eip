@@ -41,7 +41,8 @@ ipv6_find_tlv(struct xdp_md *ctx, struct hdr_cursor *cur, int *offset,
           int target, int remaining_bytes)
 {
     struct tlv *tlv_ptr;
-    while (true) {
+    for (; remaining_bytes > 1; remaining_bytes -= tlv_ptr->len + 2)
+    {    
         tlv_ptr = (struct tlv *)cur_header_pointer(ctx, cur, *offset,
                                                    sizeof(*tlv_ptr));
         if (unlikely(!tlv_ptr))
@@ -50,11 +51,8 @@ ipv6_find_tlv(struct xdp_md *ctx, struct hdr_cursor *cur, int *offset,
             return tlv_ptr->type;
         }
         *offset += tlv_ptr->len + 2;
-        remaining_bytes -= tlv_ptr->len + 2;
-        if (remaining_bytes < 2) {
-            return -ENOENT;
-        }
     }
+    return -ENOENT;
 }
 
 /* key 0 is delta time, key 1 is tts template */
