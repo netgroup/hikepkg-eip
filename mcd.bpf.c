@@ -62,7 +62,7 @@ ipv6_find_tlv(struct xdp_md *ctx, struct hdr_cursor *cur, int *offset,
 /* returns the total length in bytes of the LTV given in input */
 static __always_inline int eip_len(__u32 *ltv)
 {
-        return ((bpf_ntohl(*ltv)) >> 24) & 63;
+        return ((bpf_ntohl(*ltv)) >> 24) & 0x3f;
         // return ((((*ltv) >> 24) & 63) + 1) * 4;
 }
 
