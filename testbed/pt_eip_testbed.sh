@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # this script needs to be executed from the eclat-daemon folder
-# by calling: 
+# by calling:
 # testbed/pt_eip_testbed.sh
 #
 # topology:
@@ -24,4 +24,4 @@ MAIN_EXEC=NO
 R4_COMMAND="tcpdump -ni i43 -w develop/trace-eip.pcap"
 R4_EXEC=NO
 
-source testbed/eip_common_testbed.sh
+source testbed/4r_common_testbed.sh
