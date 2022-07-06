@@ -3,14 +3,14 @@
 read -r -d '' env2 <<-EOF
 	cd /opt/eclat-daemon
     # Python scripts to populate maps
-    python stamp_maps.py --once --pkg eip --prog mcd --map eip_mcd_time
+    python components/eip/python/pt_maps.py --once --pkg eip --prog mcd --map eip_mcd_time
 	python components/eip/python/eip_pt_tts_maps.py --id 21
 EOF
 
 read -r -d '' env3 <<-EOF
 	cd /opt/eclat-daemon
     # Python scripts to populate maps
-    python stamp_maps.py --once --pkg eip --prog mcd --map eip_mcd_time
+    python components/eip/python/pt_maps.py --once --pkg eip --prog mcd --map eip_mcd_time
 	python components/eip/python/eip_pt_tts_maps.py --id 32
 EOF
 
