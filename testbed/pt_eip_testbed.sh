@@ -2,7 +2,7 @@
 
 # this script needs to be executed from the eclat-daemon folder
 # by calling:
-# testbed/pt_eip_testbed.sh
+# components/eip/testbed/pt_eip_testbed.sh
 #
 # topology:
 #
